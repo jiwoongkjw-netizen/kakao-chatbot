@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: sedam-chatbot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: claude-haiku-4-5-20251001
+      - key: BOT_NAME
+        value: 세담택스 상담봇
+      - key: BOT_DESCRIPTION
+        value: 세무 상담 및 일반 문의에 답변하는 AI 챗봇입니다.
+      - key: ADMIN_API_KEY
+        value: sedam-admin-2026
+      - key: DB_PATH
+        value: data/knowledge.db
