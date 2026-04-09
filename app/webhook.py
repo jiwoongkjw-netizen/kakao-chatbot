@@ -83,7 +83,7 @@ if utterance in ("상담원 연결", "상담원", "사람", "직접 상담"):
         else:
             close_text = f"{close_hour}:00"
             return kr.simple_text(
-                text=f"지금은 기장사업부 업무시간이 아닙니다.\n(업무시간: 평일 09:00~{close_text})\n\n업무시간에 다시 연락주시거나, 질문을 남겨주시면 확인 후 연락드리겠습니다.",
+                text=f"지금은 기장사업부 업무시간이 아닙니다.\n(업무시간: 평일 09:00~{close_text})\n\n업무시간에 다시 연락주시거나, 연락처를 남겨주시면 확인 후 연락드리겠습니다.",
                 quick_replies=[
                     kr.make_quick_reply("질문하기", "처음으로"),
                 ],
