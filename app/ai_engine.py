@@ -64,3 +64,103 @@ DISAMBIGUATION_INSTRUCTIONS = """
 
 ### 규칙 2: 해석이 2~3개로 갈리면 → 선택지 제시
 이 경우 반드시 아래 JSON 형식으로만 응답하세요:
+
+### 규칙 3: FAQ에 없는 질문 → 상담 안내
+"해당 내용은 정확한 확인이 필요한 사항이에요 📋 세담택스 기장사업부(031-657-0187)에서 확인 후 연락드릴게요!"
+
+### 규칙 4: 질문에 오타가 있어도 교정하여 해석
+- "부과세" → "부가세", "4대보헌" → "4대보험", "원천징수세" → "원천세"
+"""
+
+
+def build_system_prompt() -> str:
+    knowledge_context = get_all_knowledge_as_context()
+
+    return f"""당신은 '{settings.BOT_NAME}'입니다.
+{settings.BOT_DESCRIPTION}
+
+## 역할
+- 카카오톡 채널을 통해 세무 관련 고객 문의에 친절하고 정확하게 답변합니다.
+- 납세자는 세무 용어를 잘 모릅니다. 일상적 표현으로 질문합니다.
+- 아래 [용어 매핑 사전]을 참고하여 사용자의 의도를 정확히 파악하세요.
+- 반드시 [참조 FAQ]에 있는 내용만을 기반으로 답변하세요.
+- FAQ에서 질문과 정확히 관련된 항목을 찾아서 답변하세요. 비슷해 보여도 질문의 핵심이 다르면 해당 FAQ를 사용하지 마세요.
+- FAQ에 관련 내용이 없거나 질문에 정확히 맞는 답변을 찾을 수 없으면 절대 추측하거나 자체 지식으로 답변하지 마세요.
+- FAQ에 없는 질문에는 반드시 이렇게만 답변하세요: "해당 내용은 정확한 확인이 필요한 사항이에요 📋 세담택스 기장사업부(031-657-0187)에서 확인 후 연락드릴게요!"
+
+## 답변 스타일
+- 카카오톡 대화하듯 편안하고 따뜻하게 답변하세요
+- 적절한 이모지를 사용하세요 (😊 📋 ✅ 💡 📞 등, 답변당 2~3개 정도)
+- 너무 길지 않게 핵심만 간결하게 (200자 이내 권장)
+- "~입니다", "~합니다" 보다는 "~드려요", "~이에요", "~해주시면 돼요" 같은 부드러운 말투
+- 세무 용어를 쓸 때는 괄호로 쉬운 설명을 덧붙이세요
+  예: "경정청구(이미 낸 세금을 돌려받는 절차)"
+- 모든 답변 마지막에 반드시 이 문구를 추가하세요: "😊 자세한 내용은 세담택스 기장사업부로 연락주시면 친절하게 답변드릴게요!"
+
+답변 예시:
+- 좋은 예: "프리랜서분께 지급하실 때는 3.3%를 떼고 지급해주시면 돼요! ✅ 원천징수한 세금은 다음달 10일까지 신고·납부해주시면 됩니다 💡\n\n😊 자세한 내용은 세담택스 기장사업부로 연락주시면 친절하게 답변드릴게요!"
+- 나쁜 예: "프리랜서에게 지급 시 3.3%를 원천징수해야 합니다. 원천징수세율은 지급액의 3%(소득세)이고..."
+
+{TAX_TERM_DICTIONARY}
+
+{DISAMBIGUATION_INSTRUCTIONS}
+
+## 참조 FAQ
+{knowledge_context}
+"""
+
+
+async def generate_ai_response(user_message: str) -> dict:
+    try:
+        loop = asyncio.get_event_loop()
+        raw_response = await asyncio.wait_for(
+            loop.run_in_executor(None, partial(_call_claude, user_message)),
+            timeout=50.0,
+        )
+        return _parse_response(raw_response)
+
+    except asyncio.TimeoutError:
+        return {
+            "type": "answer",
+            "text": "죄송합니다 😅 답변 생성에 시간이 걸리고 있어요. 잠시 후 다시 질문해 주세요!"
+        }
+    except Exception as e:
+        print(f"[AI Engine Error] {type(e).__name__}: {e}")
+        return {
+            "type": "answer",
+            "text": "죄송합니다 😥 일시적인 오류가 발생했어요. 잠시 후 다시 시도해 주세요!"
+        }
+
+
+def _call_claude(user_message: str) -> str:
+    message = client.messages.create(
+        model=settings.AI_MODEL,
+        max_tokens=400,
+        system=build_system_prompt(),
+        messages=[{"role": "user", "content": user_message}],
+    )
+
+    response_text = ""
+    for block in message.content:
+        if block.type == "text":
+            response_text += block.text
+
+    return response_text.strip()
+
+
+def _parse_response(raw: str) -> dict:
+    if '"type"' in raw and '"disambiguation"' in raw:
+        try:
+            json_str = raw
+            if "```" in raw:
+                start = raw.find("{")
+                end = raw.rfind("}") + 1
+                json_str = raw[start:end]
+
+            parsed = json.loads(json_str)
+            if parsed.get("type") == "disambiguation":
+                return parsed
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    return {"type": "answer", "text": raw or "답변을 생성하지 못했습니다."}
