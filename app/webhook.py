@@ -110,19 +110,6 @@ async def handle_kakao_webhook(request: Request):
                 ],
             )
 
-    # ── 지식 DB 정확 매칭 ──
-    db_result = search_knowledge(utterance)
-
-    if db_result:
-        answer = db_result["answer"]
-        log_chat(user_id, utterance, answer, source="db")
-        return kr.simple_text(
-            text=answer,
-            quick_replies=[
-                kr.make_quick_reply("다른 질문하기", "처음으로"),
-                kr.make_quick_reply("상담원 연결"),
-            ],
-        )
 
     # ── Claude AI 호출 ──
     ai_result = await generate_ai_response(utterance)
