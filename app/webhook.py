@@ -2,8 +2,8 @@
 웹훅 라우터 (v2 — 모호한 질문 되묻기 지원)
 
 처리 흐름:
-1. 특수 명령어 확인 (처음으로, 상담원 연결 등)
-2. 지식 DB 정확 매칭 검색
+1. 카테고리 선택 처리
+2. 특수 명령어 확인 (처음으로, 상담원 연결 등)
 3. Claude AI 호출 → 답변 or 되묻기(disambiguation) 분기
 4. 되묻기인 경우 quickReplies 버튼으로 선택지 제시
 """
@@ -46,6 +46,29 @@ async def handle_kakao_webhook(request: Request):
     if not utterance:
         return kr.error_response("메시지를 인식하지 못했습니다. 다시 입력해 주세요.")
 
+    # ── 카테고리 선택 ──
+    category_map = {
+        "원천세/급여 문의": "원천세",
+        "원천세/급여": "원천세",
+        "4대보험 문의": "4대보험",
+        "4대보험": "4대보험",
+        "부가세 문의": "부가세",
+        "부가세": "부가세",
+        "소득세/법인세 문의": "소득세",
+        "소득세/법인세": "소득세",
+        "종합소득세": "소득세",
+    }
+
+    if utterance in category_map:
+        cat = category_map[utterance]
+        return kr.simple_text(
+            text=f"{utterance} 관련 궁금한 내용을 자유롭게 질문해 주세요!\n\n예시:\n- 프리랜서 세금 어떻게 떼나요?\n- 4대보험 가입 기준이 어떻게 되나요?\n- 부가세 신고 기한이 언제예요?",
+            quick_replies=[
+                kr.make_quick_reply("상담원 연결"),
+                kr.make_quick_reply("처음으로"),
+            ],
+        )
+
     # ── 특수 명령어 ──
     if utterance in ("처음으로", "시작", "메뉴"):
         return kr.simple_text(
@@ -59,11 +82,12 @@ async def handle_kakao_webhook(request: Request):
             ],
         )
 
-if utterance in ("상담원 연결", "상담원", "사람", "직접 상담"):
+    # ── 상담원 연결 ──
+    if utterance in ("상담원 연결", "상담원", "사람", "직접 상담"):
         from datetime import datetime, timezone, timedelta
         kst = timezone(timedelta(hours=9))
         now = datetime.now(kst)
-        weekday = now.weekday()  # 0=월 ~ 6=일
+        weekday = now.weekday()
         hour = now.hour
         month = now.month
 
@@ -107,17 +131,13 @@ if utterance in ("상담원 연결", "상담원", "사람", "직접 상담"):
     ai_result = await generate_ai_response(utterance)
 
     # ── Step 3: AI 응답 분기 처리 ──
-
     if ai_result["type"] == "disambiguation":
-        # 되묻기: 선택지를 quickReplies 버튼으로 변환
         message = ai_result.get("message", "어떤 부분이 궁금하신지 선택해 주세요!")
         options = ai_result.get("options", [])
 
         quick_replies = []
-        for opt in options[:5]:  # 카카오 quickReplies 최대 5개
-            label = opt.get("label", "")[:14]  # 라벨 최대 14자
-            # 사용자가 버튼을 누르면 label이 발화로 전송됨
-            # → 다시 webhook으로 들어와서 이번엔 더 구체적인 매칭 가능
+        for opt in options[:5]:
+            label = opt.get("label", "")[:14]
             quick_replies.append(kr.make_quick_reply(label))
 
         quick_replies.append(kr.make_quick_reply("상담원 연결"))
@@ -126,7 +146,6 @@ if utterance in ("상담원 연결", "상담원", "사람", "직접 상담"):
         return kr.simple_text(text=message, quick_replies=quick_replies)
 
     else:
-        # 일반 답변
         answer = ai_result.get("text", "")
         log_chat(user_id, utterance, answer, source="ai")
         return kr.simple_text(
