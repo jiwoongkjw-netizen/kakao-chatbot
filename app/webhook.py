@@ -1,11 +1,5 @@
 """
-웹훅 라우터 (v2 — 모호한 질문 되묻기 지원)
-
-처리 흐름:
-1. 카테고리 선택 처리
-2. 특수 명령어 확인 (처음으로, 상담원 연결 등)
-3. Claude AI 호출 → 답변 or 되묻기(disambiguation) 분기
-4. 되묻기인 경우 quickReplies 버튼으로 선택지 제시
+웹훅 라우터
 """
 
 from fastapi import APIRouter, Request, Header, HTTPException
@@ -26,14 +20,11 @@ from app.knowledge_db import (
 from app.ai_engine import generate_ai_response
 
 
-# ── 카카오 웹훅 라우터 ──
-
 webhook_router = APIRouter()
 
 
 @webhook_router.post("/webhook")
 async def handle_kakao_webhook(request: Request):
-    """카카오 i 오픈빌더 스킬 서버 엔드포인트"""
     try:
         body = await request.json()
     except Exception:
@@ -48,7 +39,6 @@ async def handle_kakao_webhook(request: Request):
 
     # ── 카테고리 선택 ──
     category_map = {
-category_map = {
         "원천세/급여 문의": "원천세",
         "원천세/급여": "원천세",
         "원천세": "원천세",
@@ -68,7 +58,6 @@ category_map = {
     }
 
     if utterance in category_map:
-        cat = category_map[utterance]
         return kr.simple_text(
             text=f"{utterance} 관련 궁금한 내용을 자유롭게 질문해 주세요!\n\n예시:\n- 프리랜서 세금 어떻게 떼나요?\n- 4대보험 가입 기준이 어떻게 되나요?\n- 부가세 신고 기한이 언제예요?",
             quick_replies=[
@@ -121,7 +110,7 @@ category_map = {
                 ],
             )
 
-    # ── Step 1: 지식 DB 정확 매칭 ──
+    # ── 지식 DB 정확 매칭 ──
     db_result = search_knowledge(utterance)
 
     if db_result:
@@ -135,10 +124,9 @@ category_map = {
             ],
         )
 
-    # ── Step 2: Claude AI 호출 ──
+    # ── Claude AI 호출 ──
     ai_result = await generate_ai_response(utterance)
 
-    # ── Step 3: AI 응답 분기 처리 ──
     if ai_result["type"] == "disambiguation":
         message = ai_result.get("message", "어떤 부분이 궁금하신지 선택해 주세요!")
         options = ai_result.get("options", [])
@@ -165,7 +153,7 @@ category_map = {
         )
 
 
-# ── 관리자 API 라우터 ──
+# ── 관리자 API ──
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
