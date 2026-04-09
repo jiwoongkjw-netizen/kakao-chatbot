@@ -1,5 +1,5 @@
 """
-Claude AI 답변 생성 엔진 (v2 — 모호한 질문 처리 강화)
+Claude AI 답변 생성 엔진
 """
 
 import json
@@ -15,8 +15,6 @@ client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 TAX_TERM_DICTIONARY = """
 ## 납세자 표현 → 세무 용어 매핑 사전
-아래는 납세자들이 실제로 자주 쓰는 표현과 그에 대응하는 세무 용어입니다.
-사용자 발화에 이런 표현이 나오면 괄호 안의 세무 개념으로 해석하세요.
 
 [원천세/급여 관련]
 - "3.3 떼는 거", "삼쩜삼", "프리랜서 세금" → 사업소득 원천징수 (3.3%)
@@ -64,6 +62,16 @@ DISAMBIGUATION_INSTRUCTIONS = """
 
 ### 규칙 2: 해석이 2~3개로 갈리면 → 선택지 제시
 이 경우 반드시 아래 JSON 형식으로만 응답하세요:
+```
+{
+  "type": "disambiguation",
+  "message": "어떤 부분이 궁금하신 건지 좀 더 여쭤볼게요! 😊",
+  "options": [
+    {"label": "선택지1 (10자 이내)", "description": "부연설명"},
+    {"label": "선택지2 (10자 이내)", "description": "부연설명"}
+  ]
+}
+```
 
 ### 규칙 3: FAQ에 없는 질문 → 상담 안내
 "해당 내용은 정확한 확인이 필요한 사항이에요 📋 세담택스 기장사업부(031-657-0187)에서 확인 후 연락드릴게요!"
@@ -73,7 +81,7 @@ DISAMBIGUATION_INSTRUCTIONS = """
 """
 
 
-def build_system_prompt() -> str:
+def build_system_prompt():
     knowledge_context = get_all_knowledge_as_context()
 
     return f"""당신은 '{settings.BOT_NAME}'입니다.
@@ -110,7 +118,7 @@ def build_system_prompt() -> str:
 """
 
 
-async def generate_ai_response(user_message: str) -> dict:
+async def generate_ai_response(user_message):
     try:
         loop = asyncio.get_event_loop()
         raw_response = await asyncio.wait_for(
@@ -132,7 +140,7 @@ async def generate_ai_response(user_message: str) -> dict:
         }
 
 
-def _call_claude(user_message: str) -> str:
+def _call_claude(user_message):
     message = client.messages.create(
         model=settings.AI_MODEL,
         max_tokens=400,
@@ -148,7 +156,7 @@ def _call_claude(user_message: str) -> str:
     return response_text.strip()
 
 
-def _parse_response(raw: str) -> dict:
+def _parse_response(raw):
     if '"type"' in raw and '"disambiguation"' in raw:
         try:
             json_str = raw
