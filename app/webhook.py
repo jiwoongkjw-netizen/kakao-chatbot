@@ -59,14 +59,35 @@ async def handle_kakao_webhook(request: Request):
             ],
         )
 
-    if utterance in ("상담원 연결", "상담원", "사람", "직접 상담"):
-        return kr.basic_card(
-            title="상담원 연결",
-            description="아래 버튼을 눌러 전화 상담을 받으시거나,\n메시지를 남겨주시면 담당자가 확인 후 연락드리겠습니다.",
-            buttons=[
-                kr.make_button_phone("전화 상담", "02XXXXXXXX"),
-            ],
-        )
+if utterance in ("상담원 연결", "상담원", "사람", "직접 상담"):
+        from datetime import datetime, timezone, timedelta
+        kst = timezone(timedelta(hours=9))
+        now = datetime.now(kst)
+        weekday = now.weekday()  # 0=월 ~ 6=일
+        hour = now.hour
+        month = now.month
+
+        if month in (1, 3, 5, 6, 7):
+            close_hour = 18
+        else:
+            close_hour = 17
+
+        if weekday < 5 and 9 <= hour < close_hour:
+            return kr.basic_card(
+                title="상담원 연결",
+                description="아래 버튼을 눌러 세담택스 기장사업부로 전화 상담을 받으실 수 있습니다.",
+                buttons=[
+                    kr.make_button_phone("전화 상담 031-657-0187", "031-657-0187"),
+                ],
+            )
+        else:
+            close_text = f"{close_hour}:00"
+            return kr.simple_text(
+                text=f"지금은 기장사업부 업무시간이 아닙니다.\n(업무시간: 평일 09:00~{close_text})\n\n업무시간에 다시 연락주시거나, 질문을 남겨주시면 확인 후 연락드리겠습니다.",
+                quick_replies=[
+                    kr.make_quick_reply("질문하기", "처음으로"),
+                ],
+            )
 
     # ── Step 1: 지식 DB 정확 매칭 ──
     db_result = search_knowledge(utterance)
