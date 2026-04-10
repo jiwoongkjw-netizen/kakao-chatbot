@@ -3,6 +3,7 @@
 """
 
 import re
+import httpx
 from fastapi import APIRouter, Request, Header, HTTPException
 from typing import Optional
 
@@ -23,14 +24,74 @@ from app.ai_engine import generate_ai_response
 
 webhook_router = APIRouter()
 
-# 전화번호 패턴 (010-1234-5678, 01012345678, 010 1234 5678 등)
 PHONE_PATTERN = re.compile(r'01[016789]\d{7,8}')
+
+TEAMS_WEBHOOK_URL = "https://defaulte88931741bb4474d856effc3a3d992.ee.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/387e0d861e2d442f8dc30d6fe471b745/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=kOTe2ECVRm62P8Zol4653vs4mcOIgvP6HHdwpgRIgwk"
 
 
 def has_phone_number(text):
-    """텍스트에 전화번호가 포함되어 있는지 확인"""
     cleaned = text.replace("-", "").replace(" ", "").replace(".", "")
     return bool(PHONE_PATTERN.search(cleaned))
+
+
+def send_teams_notification(utterance):
+    """팀즈 그룹 채팅방에 문의 접수 알림 전송"""
+    try:
+        parts = utterance.replace("/", " ").split()
+        phone_found = ""
+        name_found = ""
+        content_parts = []
+        for p in parts:
+            cleaned = p.replace("-", "")
+            if cleaned.isdigit() and len(cleaned) >= 10:
+                phone_found = p
+            elif not name_found and not cleaned.isdigit():
+                name_found = p
+            else:
+                content_parts.append(p)
+        content = " ".join(content_parts) if content_parts else "내용 없음"
+
+        message = {
+            "type": "message",
+            "attachments": [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "type": "AdaptiveCard",
+                        "version": "1.4",
+                        "body": [
+                            {
+                                "type": "TextBlock",
+                                "text": "📋 새 문의 접수",
+                                "weight": "Bolder",
+                                "size": "Medium",
+                                "color": "Attention"
+                            },
+                            {
+                                "type": "FactSet",
+                                "facts": [
+                                    {"title": "이름", "value": name_found or "미입력"},
+                                    {"title": "연락처", "value": phone_found or "미입력"},
+                                    {"title": "문의내용", "value": content}
+                                ]
+                            },
+                            {
+                                "type": "TextBlock",
+                                "text": "👉 [문의 접수함 확인](https://sedam-chatbot.onrender.com/admin/page)",
+                                "wrap": True,
+                                "spacing": "Medium"
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+        with httpx.Client(timeout=5) as client:
+            client.post(TEAMS_WEBHOOK_URL, json=message)
+    except Exception as e:
+        print(f"[Teams 알림 실패] {e}")
 
 
 @webhook_router.post("/webhook")
@@ -47,61 +108,38 @@ async def handle_kakao_webhook(request: Request):
     if not utterance:
         return kr.error_response("메시지를 인식하지 못했습니다. 다시 입력해 주세요.")
 
-    # ── 카테고리 선택 ──
-    category_map = {
-        "원천세/급여 문의": "원천세",
-        "원천세/급여": "원천세",
-        "원천세": "원천세",
-        "4대보험 문의": "4대보험",
-        "4대보험": "4대보험",
-        "사대보험": "4대보험",
-        "사대보험 문의": "4대보험",
-        "부가세 문의": "부가세",
-        "부가세": "부가세",
-        "부가가치세": "부가세",
-        "소득세/법인세 문의": "소득세",
-        "소득세/법인세": "소득세",
-        "종합소득세": "소득세",
-        "소득세": "소득세",
-        "법인세": "소득세",
-        "종소세": "소득세",
-    }
-
-    if utterance in category_map:
-        return kr.simple_text(
-            text=f"{utterance} 관련 궁금한 내용을 자유롭게 질문해 주세요!\n\n예시:\n- 프리랜서 세금 어떻게 떼나요?\n- 4대보험 가입 기준이 어떻게 되나요?\n- 부가세 신고 기한이 언제예요?",
-            quick_replies=[
-                kr.make_quick_reply("상담원 연결"),
-                kr.make_quick_reply("처음으로"),
-            ],
-        )
-
-    # ── 특수 명령어 ──
+    # ── 처음으로 / 시작 ──
     if utterance in ("처음으로", "시작", "메뉴"):
         return kr.simple_text(
-            text=f"안녕하세요! {settings.BOT_NAME}입니다.\n무엇이 궁금하신가요?",
+            text=f"안녕하세요! 😊 {settings.BOT_NAME}입니다.\n무엇을 도와드릴까요?",
             quick_replies=[
-                kr.make_quick_reply("원천세/급여"),
-                kr.make_quick_reply("4대보험"),
-                kr.make_quick_reply("부가세"),
-                kr.make_quick_reply("종합소득세"),
+                kr.make_quick_reply("질문하기"),
                 kr.make_quick_reply("상담원 연결"),
+                kr.make_quick_reply("문의하기"),
             ],
         )
 
-    # ── 문의 남기기 ──
-    if utterance == "문의 남기기":
+    # ── 질문하기 ──
+    if utterance == "질문하기":
         return kr.simple_text(
-            text="아래 형식으로 남겨주시면 업무시간에 확인 후 연락드릴게요! 😊\n\n이름/연락처/문의내용\n\n예시: 홍길동/010-1234-5678/프리랜서 세금 관련 문의",
+            text="궁금한 내용을 자유롭게 질문해 주세요! 😊\n\n예시:\n- 프리랜서 세금 어떻게 떼나요?\n- 4대보험 가입 기준이 어떻게 되나요?\n- 부가세 신고 기한이 언제예요?",
+        )
+
+    # ── 문의하기 ──
+    if utterance == "문의하기":
+        return kr.simple_text(
+            text="이름, 연락처, 문의내용을 남겨주시면\n기장사업부에서 확인 후 최대한 빨리 연락드릴게요! 😊\n\n예시: 홍길동 010-1234-5678 프리랜서 세금 관련 문의",
         )
 
     # ── 문의 접수 감지 (전화번호가 포함된 메시지) ──
     if has_phone_number(utterance):
         log_chat(user_id, utterance, "[문의 접수 완료]", source="inquiry")
+        send_teams_notification(utterance)
         return kr.simple_text(
             text="문의가 접수되었습니다! ✅\n기장사업부에서 확인 후 최대한 빨리 연락드리겠습니다.\n\n감사합니다 😊",
             quick_replies=[
-                kr.make_quick_reply("다른 질문하기", "처음으로"),
+                kr.make_quick_reply("질문하기"),
+                kr.make_quick_reply("처음으로"),
             ],
         )
 
@@ -132,8 +170,8 @@ async def handle_kakao_webhook(request: Request):
             return kr.simple_text(
                 text=f"지금은 기장사업부 업무시간이 아닙니다.\n(업무시간: 평일 09:00~{close_text})\n\n전화가 어려우시면 문의를 남겨주세요! 😊",
                 quick_replies=[
-                    kr.make_quick_reply("문의 남기기"),
-                    kr.make_quick_reply("질문하기", "처음으로"),
+                    kr.make_quick_reply("문의하기"),
+                    kr.make_quick_reply("처음으로"),
                 ],
             )
 
@@ -162,8 +200,9 @@ async def handle_kakao_webhook(request: Request):
         return kr.simple_text(
             text=answer,
             quick_replies=[
-                kr.make_quick_reply("다른 질문하기", "처음으로"),
+                kr.make_quick_reply("질문하기"),
                 kr.make_quick_reply("상담원 연결"),
+                kr.make_quick_reply("문의하기"),
             ],
         )
 
