@@ -110,7 +110,6 @@ async def handle_kakao_webhook(request: Request):
                 ],
             )
 
-
     # ── Claude AI 호출 ──
     ai_result = await generate_ai_response(utterance)
 
@@ -128,7 +127,7 @@ async def handle_kakao_webhook(request: Request):
         log_chat(user_id, utterance, f"[되묻기] {message}", source="ai_disambig")
         return kr.simple_text(text=message, quick_replies=quick_replies)
 
-else:
+    else:
         answer = ai_result.get("text", "")
         if len(answer) > 900:
             answer = answer[:900] + "\n\n😊 자세한 내용은 세담택스 기장사업부로 연락주시면 친절하게 답변드릴게요!"
