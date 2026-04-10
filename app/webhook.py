@@ -215,4 +215,23 @@ async def api_update_knowledge(
 async def api_delete_knowledge(
     knowledge_id: int, x_admin_key: Optional[str] = Header(None)
 ):
-    verify
+    verify_admin(x_admin_key)
+    if not delete_knowledge(knowledge_id):
+        raise HTTPException(status_code=404, detail="해당 항목 없음")
+    return {"message": "삭제 완료"}
+
+
+@admin_router.post("/knowledge/bulk")
+async def api_bulk_insert(request: Request, x_admin_key: Optional[str] = Header(None)):
+    verify_admin(x_admin_key)
+    items = await request.json()
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="JSON 배열 형식 필요")
+    count = bulk_insert_knowledge(items)
+    return {"message": f"{count}건 추가 완료"}
+
+
+@admin_router.get("/logs")
+async def api_get_logs(limit: int = 50, x_admin_key: Optional[str] = Header(None)):
+    verify_admin(x_admin_key)
+    return {"logs": get_recent_logs(limit)}
