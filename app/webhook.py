@@ -79,6 +79,31 @@ async def handle_kakao_webhook(request: Request):
             ],
         )
 
+    # ── 문의 남기기 ──
+    if utterance == "문의 남기기":
+        return kr.simple_text(
+            text="아래 형식으로 남겨주시면 업무시간에 확인 후 연락드릴게요! 😊\n\n이름/연락처/문의내용\n\n예시: 홍길동/010-1234-5678/프리랜서 세금 관련 문의",
+        )
+
+    # ── 문의 접수 감지 (이름/연락처/내용 형식) ──
+    if "/" in utterance and any(c.isdigit() for c in utterance):
+        parts = utterance.split("/")
+        if len(parts) >= 2:
+            has_phone = False
+            for part in parts:
+                cleaned = part.strip().replace("-", "")
+                if cleaned.isdigit() and len(cleaned) >= 10:
+                    has_phone = True
+                    break
+            if has_phone:
+                log_chat(user_id, utterance, "[문의 접수 완료]", source="inquiry")
+                return kr.simple_text(
+                    text="문의가 접수되었습니다! ✅\n업무시간에 담당자가 확인 후 연락드리겠습니다.\n\n감사합니다 😊",
+                    quick_replies=[
+                        kr.make_quick_reply("다른 질문하기", "처음으로"),
+                    ],
+                )
+
     # ── 상담원 연결 ──
     if utterance in ("상담원 연결", "상담원", "사람", "직접 상담"):
         from datetime import datetime, timezone, timedelta
@@ -104,8 +129,9 @@ async def handle_kakao_webhook(request: Request):
         else:
             close_text = f"{close_hour}:00"
             return kr.simple_text(
-                text=f"지금은 기장사업부 업무시간이 아닙니다.\n(업무시간: 평일 09:00~{close_text})\n\n업무시간에 다시 연락주시거나, 연락처를 남겨주시면 확인 후 연락드리겠습니다.",
+                text=f"지금은 기장사업부 업무시간이 아닙니다.\n(업무시간: 평일 09:00~{close_text})\n\n전화가 어려우시면 문의를 남겨주세요! 😊",
                 quick_replies=[
+                    kr.make_quick_reply("문의 남기기"),
                     kr.make_quick_reply("질문하기", "처음으로"),
                 ],
             )
@@ -189,23 +215,4 @@ async def api_update_knowledge(
 async def api_delete_knowledge(
     knowledge_id: int, x_admin_key: Optional[str] = Header(None)
 ):
-    verify_admin(x_admin_key)
-    if not delete_knowledge(knowledge_id):
-        raise HTTPException(status_code=404, detail="해당 항목 없음")
-    return {"message": "삭제 완료"}
-
-
-@admin_router.post("/knowledge/bulk")
-async def api_bulk_insert(request: Request, x_admin_key: Optional[str] = Header(None)):
-    verify_admin(x_admin_key)
-    items = await request.json()
-    if not isinstance(items, list):
-        raise HTTPException(status_code=400, detail="JSON 배열 형식 필요")
-    count = bulk_insert_knowledge(items)
-    return {"message": f"{count}건 추가 완료"}
-
-
-@admin_router.get("/logs")
-async def api_get_logs(limit: int = 50, x_admin_key: Optional[str] = Header(None)):
-    verify_admin(x_admin_key)
-    return {"logs": get_recent_logs(limit)}
+    verify
