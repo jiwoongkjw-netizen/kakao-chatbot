@@ -1,8 +1,5 @@
 """
 지식 데이터베이스 관리 모듈 (SQLite + 키워드 매칭)
-
-FAQ/정형 답변을 저장하고, 사용자 발화에서 키워드를 추출하여
-가장 적합한 답변을 검색합니다.
 """
 
 import json
@@ -16,7 +13,6 @@ DB_PATH = settings.DB_PATH
 
 
 def get_connection() -> sqlite3.Connection:
-    """SQLite 연결 (동기)"""
     os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -24,7 +20,6 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db():
-    """테이블 생성 (서버 시작 시 1회 호출)"""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -47,30 +42,26 @@ def init_db():
             utterance   TEXT NOT NULL,
             response    TEXT NOT NULL,
             source      TEXT DEFAULT 'ai',
+            handled     INTEGER DEFAULT 0,
             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # 기존 테이블에 handled 컬럼이 없으면 추가
+    try:
+        cursor.execute("ALTER TABLE chat_logs ADD COLUMN handled INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # 이미 있으면 무시
 
     conn.commit()
     conn.close()
 
 
-# ── 지식 검색 ──
-
 def search_knowledge(utterance: str) -> Optional[dict]:
-    """
-    사용자 발화에서 키워드 매칭으로 가장 적합한 FAQ를 검색합니다.
-
-    검색 우선순위:
-    1. question 컬럼에 발화 전체가 포함된 경우 (정확 매칭)
-    2. keywords 컬럼의 키워드가 발화에 포함된 경우 (키워드 매칭)
-    3. question에 발화의 단어가 포함된 경우 (부분 매칭)
-    """
     conn = get_connection()
     cursor = conn.cursor()
     utterance_lower = utterance.strip().lower()
 
-    # 1단계: 질문 정확 매칭 (발화가 질문에 포함되거나 질문이 발화에 포함)
     cursor.execute("""
         SELECT *, 100 as score FROM knowledge
         WHERE LOWER(question) = ?
@@ -84,7 +75,6 @@ def search_knowledge(utterance: str) -> Optional[dict]:
         conn.close()
         return dict(row)
 
-    # 2단계: 키워드 매칭 (점수 기반)
     cursor.execute("SELECT * FROM knowledge WHERE keywords != ''")
     all_rows = cursor.fetchall()
 
@@ -100,11 +90,10 @@ def search_knowledge(utterance: str) -> Optional[dict]:
                 best_score = score
                 best_match = dict(row)
 
-    if best_match and best_score >= 0.3:  # 30% 이상 키워드 매칭
+    if best_match and best_score >= 0.3:
         conn.close()
         return best_match
 
-    # 3단계: 단어 부분 매칭
     words = [w for w in utterance_lower.split() if len(w) >= 2]
     for word in words:
         cursor.execute("""
@@ -122,9 +111,6 @@ def search_knowledge(utterance: str) -> Optional[dict]:
 
 
 def get_all_knowledge_as_context() -> str:
-    """
-    전체 FAQ를 텍스트로 변환하여 AI 프롬프트 컨텍스트로 제공합니다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT category, question, answer FROM knowledge ORDER BY category, id")
@@ -146,10 +132,7 @@ def get_all_knowledge_as_context() -> str:
     return "\n".join(lines)
 
 
-# ── CRUD 관리 ──
-
 def add_knowledge(category: str, question: str, answer: str, keywords: str = "") -> int:
-    """FAQ 추가"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -163,7 +146,6 @@ def add_knowledge(category: str, question: str, answer: str, keywords: str = "")
 
 
 def update_knowledge(knowledge_id: int, **kwargs) -> bool:
-    """FAQ 수정"""
     allowed = {"category", "question", "answer", "keywords"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not updates:
@@ -184,7 +166,6 @@ def update_knowledge(knowledge_id: int, **kwargs) -> bool:
 
 
 def delete_knowledge(knowledge_id: int) -> bool:
-    """FAQ 삭제"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM knowledge WHERE id = ?", (knowledge_id,))
@@ -195,7 +176,6 @@ def delete_knowledge(knowledge_id: int) -> bool:
 
 
 def list_knowledge() -> list:
-    """전체 FAQ 목록"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM knowledge ORDER BY category, id")
@@ -205,7 +185,6 @@ def list_knowledge() -> list:
 
 
 def bulk_insert_knowledge(items: list) -> int:
-    """FAQ 일괄 입력"""
     conn = get_connection()
     cursor = conn.cursor()
     count = 0
@@ -225,14 +204,11 @@ def bulk_insert_knowledge(items: list) -> int:
     return count
 
 
-# ── 대화 로그 ──
-
 def log_chat(user_id: str, utterance: str, response: str, source: str = "ai"):
-    """대화 기록 저장"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO chat_logs (user_id, utterance, response, source) VALUES (?, ?, ?, ?)",
+        "INSERT INTO chat_logs (user_id, utterance, response, source, handled) VALUES (?, ?, ?, ?, 0)",
         (user_id, utterance, response[:2000], source)
     )
     conn.commit()
@@ -240,7 +216,6 @@ def log_chat(user_id: str, utterance: str, response: str, source: str = "ai"):
 
 
 def get_recent_logs(limit: int = 50) -> list:
-    """최근 대화 로그 조회"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -252,10 +227,20 @@ def get_recent_logs(limit: int = 50) -> list:
     return rows
 
 
-# ── 초기 데이터 로드 ──
+def mark_log_handled(log_id: int, handled: bool) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE chat_logs SET handled = ? WHERE id = ?",
+        (1 if handled else 0, log_id)
+    )
+    conn.commit()
+    affected = cursor.rowcount
+    conn.close()
+    return affected > 0
+
 
 def seed_from_json(json_path: str = "data/seed_data.json"):
-    """JSON 파일에서 초기 FAQ 데이터 로드"""
     if not os.path.exists(json_path):
         return 0
 
@@ -264,7 +249,7 @@ def seed_from_json(json_path: str = "data/seed_data.json"):
     cursor.execute("SELECT COUNT(*) as cnt FROM knowledge")
     if cursor.fetchone()["cnt"] > 0:
         conn.close()
-        return 0  # 이미 데이터가 있으면 건너뛰기
+        return 0
 
     conn.close()
 
